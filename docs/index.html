@@ -268,8 +268,8 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
           <dl class="kv"><dt>Вложено</dt><dd>${fmt(pos.invested)} USDC</dd>
           <dt>${SYM}</dt><dd>${fmt(pos.tok)}</dd>
           ${pos.usdc ? `<dt>USDC</dt><dd>${fmt(pos.usdc)}</dd>` : ''}
-          <dt>Средняя цена</dt><dd>$${(pos.cost / pos.tok).toFixed(6)}</dd>
-          <dt>Безубыток</dt><dd>$${((pos.invested - (pos.usdc || 0)) / pos.tok).toFixed(6)}</dd>
+          ${pos.tok > 0 ? `<dt>Средняя цена</dt><dd>$${(pos.cost / pos.tok).toFixed(6)}</dd>
+          <dt>Безубыток</dt><dd>$${Math.max(0, (pos.invested - (pos.usdc || 0)) / pos.tok).toFixed(6)}</dd>` : ''}
           <dt>Стоимость</dt><dd>${fmt(val)} USDC</dd>
           <dt>Реализовано</dt><dd class="${cls(pos.realized)}">${sgn(pos.realized)}</dd>
           <dt>Не реализовано</dt><dd class="${cls(unr)}">${sgn(unr)}</dd></dl></div>`;
