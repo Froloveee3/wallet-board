@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Закрытая страница</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: gate card → header with live status → owner tiles → chart (timeframes, Price/MCap) → ledger table → notes */
+:root {
+  --bg: #f4f6f8; --panel: #ffffff; --fg: #141a22; --muted: #5b6672; --line: #dfe4ea; --grid: #edf0f3;
+  --vadim: #B77900; --emil: #C2257E; --buy: #1C7FBF; --sell: #C9392E; --new: #6b4fd8;
+  --up: #17895c; --down: #c63d33; --pos: #13784f; --neg: #b3362c; --warn-bg: #fff4d6; --warn-fg: #6b4b00;
+  --font-body: "Manrope", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1116; --panel: #151a21; --fg: #e4e9ef; --muted: #8d98a5; --line: #252d37; --grid: #1c232c;
+  --vadim: #B07A0E; --emil: #D94D95; --buy: #3592CC; --sell: #E5574B; --new: #9a85f0;
+  --up: #2bb37f; --down: #e0574b; --pos: #3cc58f; --neg: #f07368; --warn-bg: #3a2f10; --warn-fg: #f3d58a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1116; --panel: #151a21; --fg: #e4e9ef; --muted: #8d98a5; --line: #252d37; --grid: #1c232c;
+  --vadim: #B07A0E; --emil: #D94D95; --buy: #3592CC; --sell: #E5574B; --new: #9a85f0;
+  --up: #2bb37f; --down: #e0574b; --pos: #3cc58f; --neg: #f07368; --warn-bg: #3a2f10; --warn-fg: #f3d58a; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+[hidden] { display: none !important; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 24px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 24px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+h1 { font-weight: 800; font-size: clamp(24px, 4vw, 34px); line-height: 1.1; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-weight: 700; font-size: 18px; margin: 0; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.sub { color: var(--muted); margin: 0; }
+button, input { font: inherit; }
+.btn { font-weight: 700; background: var(--fg); color: var(--bg); border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+.btn:focus-visible, .seg button:focus-visible, .link:focus-visible, input:focus-visible { outline: 2px solid var(--buy); outline-offset: 2px; }
+.link { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; padding: 0; font-size: 13px; }
+
+/* gate */
+.gate { min-height: 100vh; display: grid; place-items: center; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.gate form { width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; display: grid; gap: 14px; }
+.gate label { display: grid; gap: 6px; font-weight: 600; font-size: 14px; }
+.gate input[type=password] { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+.check { display: flex !important; align-items: center; gap: 8px; font-weight: 500 !important; color: var(--muted); }
+.err { color: var(--neg); font-size: 14px; margin: 0; min-height: 1.5em; }
+
+/* header */
+.head { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: end; }
+.head > div { display: grid; gap: 6px; min-width: 0; }
+.status { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+.status span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.on { background: var(--pos); }
+.dot.bad { background: var(--neg); }
+.banner { background: var(--warn-bg); color: var(--warn-fg); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+.banner b { font-weight: 700; }
+
+/* tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.tile.new { border-color: var(--new); }
+.tile-head { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.sw { width: 12px; height: 12px; border-radius: 3px; flex: none; display: inline-block; }
+.big { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 600; line-height: 1.15; }
+.big small { font-size: 14px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13.5px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.pos { color: var(--pos); } .neg { color: var(--neg); }
+
+/* chart */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: 600 13px var(--font-mono); background: transparent; color: var(--muted); border: 0; padding: 6px 11px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.ohlc { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+.ohlc b { color: var(--fg); font-weight: 500; }
+#chart { height: 540px; min-width: 0; position: relative; }
+@media (max-width: 600px) { #chart { height: 430px; } }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.ln { width: 22px; height: 0; border-top: 2px solid; display: inline-block; }
+.ln.dash { border-top-style: dashed; }
+
+/* table */
+section { display: grid; gap: 12px; min-width: 0; }
+.sec-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: baseline; }
+.table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 900px; }
+th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+td { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+th:nth-child(-n+3), td:nth-child(-n+3) { text-align: left; }
+td.txt { font-family: var(--font-body); }
+tr:last-child td { border-bottom: 0; }
+tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
+.op { font: 700 11px var(--font-mono); letter-spacing: .04em; padding: 2px 7px; border-radius: 4px; border: 1px solid currentColor; display: inline-block; }
+.op.buy { color: var(--buy); } .op.sell { color: var(--sell); } .op.misc { color: var(--muted); } .op.new { color: var(--new); }
+.who { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.tx a { color: var(--muted); }
+.notes { display: grid; gap: 8px; color: var(--muted); font-size: 14px; max-width: 78ch; }
+.notes p { margin: 0; }
+.notes b { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate">
+  <form id="gate-form" autocomplete="off">
+    <div class="eyebrow">Закрытая страница</div>
+    <h2>Введите пароль</h2>
+    <label for="pw">Пароль
+      <input id="pw" type="password" autocomplete="current-password" required>
+    </label>
+    <label class="check" for="remember"><input id="remember" type="checkbox"> Запомнить на этом устройстве</label>
+    <button class="btn" type="submit" id="unlock">Открыть</button>
+    <p class="err" id="gate-err" role="alert"></p>
+  </form>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <div class="head">
+    <div>
+      <div class="eyebrow" id="pair-label"></div>
+      <h1 id="title"></h1>
+      <div class="status">
+        <span><i class="dot" id="dot-price"></i><span id="st-price">цена: загрузка…</span></span>
+        <span><i class="dot" id="dot-wallet"></i><span id="st-wallet">кошелёк: проверка…</span></span>
+        <span id="st-sync"></span>
+      </div>
+    </div>
+    <button class="link" type="button" id="logout">Выйти</button>
+  </div>
+
+  <div class="banner" id="banner" hidden></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Таймфрейм" id="tf"></div>
+      <div class="seg" role="group" aria-label="Шкала" id="mode">
+        <button type="button" data-mode="price" aria-pressed="true">Price</button>
+        <button type="button" data-mode="mcap" aria-pressed="false">MCap</button>
+      </div>
+    </div>
+    <div class="ohlc" id="ohlc"></div>
+    <div id="chart" role="img" aria-label="Свечной график с линиями средних цен и сделок"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <section>
+    <div class="sec-head">
+      <h2>Журнал кошелька</h2>
+      <label class="check" for="only-trades"><input id="only-trades" type="checkbox" checked> Только операции с 1WIN и пресейл</label>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Дата, UTC+5</th><th>Операция</th><th>Чьё</th><th>1WIN</th><th>USDC</th><th>SOL</th><th>Цена</th><th>Сейчас против цены</th><th>Транзакция</th></tr></thead>
+        <tbody id="ledger"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Как это работает</h2>
+    <div class="notes" id="notes"></div>
+  </section>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="lib.js"></script>
+<script>
+(function () {
+  'use strict';
+  const L = window.WalletLib;
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  const PW_KEY = 'wb.pw', TF_KEY = 'wb.tf', MODE_KEY = 'wb.mode';
+  // api.mainnet-beta.solana.com refuses browser requests, so the page uses PublicNode
+  const RPC = ['https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com'];
+
+  async function loadBox(name) {
+    const r = await fetch('data/' + name + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) throw new Error(name + ' HTTP ' + r.status);
+    return r.json();
+  }
+
+  // ---------- gate ----------
+  $('gate-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const pw = $('pw').value;
+    $('unlock').disabled = true; $('gate-err').textContent = 'Проверяю…';
+    try { await open(pw); if ($('remember').checked) store.set(PW_KEY, pw); }
+    catch (err) { $('gate-err').textContent = err.name === 'OperationError' ? 'Неверный пароль.' : 'Не удалось открыть: ' + err.message; }
+    $('unlock').disabled = false;
+  });
+  $('logout').addEventListener('click', () => { store.del(PW_KEY); location.reload(); });
+
+  let S = null; // app state after unlock
+  async function open(pw) {
+    const cfg = await L.decryptJSON(await loadBox('config.enc'), pw);
+    let wallet = { txs: [], balances: null, syncedAt: null };
+    try { wallet = await L.decryptJSON(await loadBox('wallet.enc'), pw); } catch (e) { /* first run: page checks the chain itself */ }
+    $('gate').hidden = true; $('app').hidden = false; $('gate-err').textContent = '';
+    start(cfg, wallet, pw);
+  }
+  const saved = store.get(PW_KEY);
+  if (saved) open(saved).catch(() => store.del(PW_KEY));
+
+  // ---------- helpers ----------
+  const fmt = (x, d = 2) => Number(x).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const sgn = (x, d = 2) => (x > 0 ? '+' : x < 0 ? '−' : '') + fmt(Math.abs(x), d);
+  const cls = x => x > 0 ? 'pos' : x < 0 ? 'neg' : '';
+  const two = n => String(n).padStart(2, '0');
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
+  const compact = x => x >= 1e9 ? (x / 1e9).toFixed(2) + 'B' : x >= 1e6 ? (x / 1e6).toFixed(2) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'K' : x.toFixed(0);
+
+  const TYPE = {
+    BUY: ['BUY', 'buy', 'Покупка'], SELL: ['SELL', 'sell', 'Продажа'], CLAIM: ['CLAIM', 'buy', 'Получение пресейла'],
+    BUY_SOL: ['BUY', 'buy', 'Покупка за SOL'], SELL_SOL: ['SELL', 'sell', 'Продажа в SOL'],
+    WIN_IN: ['IN', 'misc', 'Перевод 1WIN на кошелёк'], WIN_OUT: ['OUT', 'misc', 'Перевод 1WIN с кошелька'],
+    USDC_IN: ['IN', 'misc', 'Пришли USDC'], USDC_OUT: ['OUT', 'misc', 'Ушли USDC'],
+    SOL_TO_USDC: ['SWAP', 'misc', 'SOL → USDC'], USDC_TO_SOL: ['SWAP', 'misc', 'USDC → SOL'],
+    SOL_IN: ['IN', 'misc', 'Пришли SOL'], SOL_OUT: ['OUT', 'misc', 'Ушли SOL'],
+    FAILED: ['FAIL', 'misc', 'Неуспешная'], OTHER: ['—', 'misc', 'Прочее']
+  };
+  const isWinTx = t => Math.abs(t.win) > 1e-12;
+
+  // ---------- app ----------
+  function start(cfg, wallet, pw) {
+    const tz = (cfg.tzOffsetHours || 5) * 3600;
+    const people = cfg.people;
+    S = { cfg, pw, txs: wallet.txs.slice(), balances: wallet.balances, syncedAt: wallet.syncedAt,
+          price: cfg.lastPrice || 0, mcapFactor: cfg.circulating || 0, priceAt: null,
+          walletAt: null, walletErr: false, priceErr: false,
+          tf: store.get(TF_KEY) || '5m', mode: store.get(MODE_KEY) || 'price', candles: [] };
+    document.title = cfg.title;
+    $('title').textContent = cfg.title;
+    $('pair-label').textContent = cfg.pairLabel;
+
+    const known = () => new Set(S.txs.map(t => t.sig));
+    const after = t => t.time > cfg.cutoff.time && t.sig !== cfg.cutoff.sig;
+    const unallocated = () => S.txs.filter(t => t.ok && after(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9));
+
+    // ----- tiles & banner -----
+    function renderTiles() {
+      const P = S.price, tiles = $('tiles'); let html = '';
+      let alloc = 0;
+      for (const p of people) {
+        const pos = cfg.positions[p.id];
+        alloc += pos.tok;
+        const val = pos.tok * P + (pos.usdc || 0), unr = pos.tok * P - pos.cost, pnl = unr + pos.realized;
+        html += `<div class="tile"><div class="tile-head"><i class="sw" style="background:var(--${p.color})"></i>${p.name}</div>
+          <div class="big ${cls(pnl)}">${P ? sgn(pnl) + ' USDC <small>(' + sgn(pnl / pos.invested * 100, 1) + '%)</small>' : '…'}</div>
+          <dl class="kv"><dt>Вложено</dt><dd>${fmt(pos.invested)} USDC</dd>
+          <dt>1WIN</dt><dd>${fmt(pos.tok)}</dd>
+          ${pos.usdc ? `<dt>USDC</dt><dd>${fmt(pos.usdc)}</dd>` : ''}
+          <dt>Средняя цена</dt><dd>$${(pos.cost / pos.tok).toFixed(6)}</dd>
+          <dt>Безубыток</dt><dd>$${((pos.invested - (pos.usdc || 0)) / pos.tok).toFixed(6)}</dd>
+          <dt>Стоимость</dt><dd>${fmt(val)} USDC</dd>
+          <dt>Реализовано</dt><dd class="${cls(pos.realized)}">${sgn(pos.realized)}</dd>
+          <dt>Не реализовано</dt><dd class="${cls(unr)}">${sgn(unr)}</dd></dl></div>`;
+      }
+      const un = unallocated();
+      const uw = un.reduce((a, t) => a + t.win, 0), uu = un.reduce((a, t) => a + t.usdc, 0);
+      if (un.length) {
+        html += `<div class="tile new"><div class="tile-head"><i class="sw" style="background:var(--new)"></i>Не распределено</div>
+          <div class="big">${sgn(uw)} 1WIN</div>
+          <dl class="kv"><dt>Сделок</dt><dd>${un.length}</dd><dt>USDC</dt><dd>${sgn(uu)}</dd>
+          <dt>Стоимость 1WIN</dt><dd>${fmt(uw * P)} USDC</dd><dt>Итог (1WIN + USDC)</dt><dd class="${cls(uw * P + uu)}">${sgn(uw * P + uu)}</dd></dl>
+          <p class="sub" style="font-size:13px;margin:0">Сделки после ${cfg.cutoff.label}. Их нужно поделить вручную.</p></div>`;
+      }
+      const b = S.balances;
+      const tot = people.reduce((a, p) => a + cfg.positions[p.id].invested, 0);
+      const wv = b ? b.win * P + b.usdc : 0;
+      html += `<div class="tile"><div class="tile-head">Кошелёк целиком</div>
+        <div class="big ${cls(wv - tot)}">${b && P ? sgn(wv - tot) + ' USDC <small>(' + sgn((wv - tot) / tot * 100, 1) + '%)</small>' : '…'}</div>
+        <dl class="kv"><dt>Вложено</dt><dd>${fmt(tot)} USDC</dd>
+        <dt>1WIN</dt><dd>${b ? fmt(b.win) : '…'}</dd><dt>USDC</dt><dd>${b ? fmt(b.usdc) : '…'}</dd>
+        <dt>SOL на газ</dt><dd>${b ? fmt(b.sol, 4) : '…'}</dd>
+        <dt>Стоимость</dt><dd>${b ? fmt(wv) + ' USDC' : '…'}</dd>
+        <dt>Цена 1WIN</dt><dd>${P ? '$' + P.toFixed(6) : '…'}</dd></dl></div>`;
+      tiles.innerHTML = html;
+
+      // balance check: allocated + unallocated must equal what the chain says
+      const banner = $('banner');
+      if (b) {
+        const expW = alloc + uw, expU = people.reduce((a, p) => a + (cfg.positions[p.id].usdc || 0), 0) + uu;
+        const dW = b.win - expW, dU = b.usdc - expU;
+        if (Math.abs(dW) > 1e-6 || Math.abs(dU) > 1e-4) {
+          banner.hidden = false;
+          banner.innerHTML = `<b>Баланс кошелька не сходится с журналом:</b> разница ${sgn(dW, 6)} 1WIN, ${sgn(dU, 4)} USDC. Скорее всего, новая транзакция ещё не подтянулась, страница проверит снова через минуту.`;
+        } else if (un.length) {
+          banner.hidden = false;
+          banner.innerHTML = `<b>Есть новые сделки (${un.length}), они ещё не поделены между Вадимом и Эмилем.</b> Они показаны отдельно, в фиолетовой плитке и в журнале.`;
+        } else banner.hidden = true;
+      }
+    }
+
+    // ----- ledger -----
+    function renderLedger() {
+      const P = S.price, only = $('only-trades').checked;
+      const rows = S.txs.slice().sort((a, b) => b.time - a.time)
+        .filter(t => !only || isWinTx(t) || (cfg.notes[t.sig] && cfg.notes[t.sig].trade));
+      $('ledger').innerHTML = rows.map(t => {
+        const note = cfg.notes[t.sig] || {}, ty = TYPE[t.type] || TYPE.OTHER, un = t.ok && after(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9);
+        const d = new Date((t.time + tz) * 1000);
+        const date = `${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
+        const who = un ? `<span class="who"><i class="sw" style="background:var(--new)"></i>не распределено</span>`
+          : note.owner ? `<span class="who">${note.owner.map(id => `<i class="sw" style="background:var(--${id})"></i>`).join('')}${note.ownerLabel}</span>` : '<span class="sub">—</span>';
+        const price = t.price || note.price;
+        const vs = price && P ? (P / price - 1) * 100 : null;
+        return `<tr class="${un ? 'unalloc' : ''}"><td>${date}</td>
+          <td class="txt"><span class="op ${un ? 'new' : ty[1]}">${ty[0]}</span> ${note.label || ty[2]}</td>
+          <td class="txt">${who}</td>
+          <td class="${cls(t.win)}">${t.win ? sgn(t.win) : ''}</td><td class="${cls(t.usdc)}">${t.usdc ? sgn(t.usdc) : ''}</td>
+          <td>${Math.abs(t.sol) >= 1e-4 ? sgn(t.sol, 4) : ''}</td>
+          <td>${price ? '$' + price.toFixed(7) : ''}</td><td class="${vs == null ? '' : cls(vs)}">${vs == null ? '' : sgn(vs, 1) + '%'}</td>
+          <td class="tx"><a href="https://solscan.io/tx/${t.sig}" target="_blank" rel="noopener noreferrer">${t.sig.slice(0, 6)}…</a></td></tr>`;
+      }).join('') || `<tr><td colspan="9" class="txt sub">Журнал пока пуст: страница загружает историю из блокчейна.</td></tr>`;
+    }
+    $('only-trades').addEventListener('change', renderLedger);
+
+    // ----- status -----
+    const clock = d => d.toLocaleTimeString('ru-RU', { timeZone: cfg.tz, hour12: false });
+    function renderStatus() {
+      $('dot-price').className = 'dot ' + (S.priceErr ? 'bad' : S.priceAt ? 'on' : '');
+      $('st-price').textContent = S.priceErr ? 'цена: нет связи' : S.priceAt ? `цена live, ${clock(S.priceAt)}` : 'цена: загрузка…';
+      $('dot-wallet').className = 'dot ' + (S.walletErr ? 'bad' : S.walletAt ? 'on' : '');
+      $('st-wallet').textContent = S.walletErr ? 'кошелёк: нет связи с Solana, повтор через минуту' : S.walletAt ? `кошелёк проверен, ${clock(S.walletAt)}` : 'кошелёк: проверка…';
+      $('st-sync').textContent = S.syncedAt ? `журнал GitHub обновлён ${new Date(S.syncedAt * 1000).toLocaleString('ru-RU', { timeZone: cfg.tz, hour12: false }).slice(0, 17)}` : '';
+    }
+
+    // ----- chart -----
+    const TF = { '1m': ['minute', 1, 60], '5m': ['minute', 5, 300], '15m': ['minute', 15, 900], '1h': ['hour', 1, 3600], '4h': ['hour', 4, 14400], '1D': ['day', 1, 86400] };
+    if (!TF[S.tf]) S.tf = '5m';
+    $('tf').innerHTML = Object.keys(TF).map(k => `<button type="button" data-tf="${k}" aria-pressed="${k === S.tf}">${k}</button>`).join('');
+    const el = $('chart');
+    if (!window.LightweightCharts) { el.textContent = 'Не загрузилась библиотека графика. Проверьте интернет и обновите страницу.'; }
+    const chart = window.LightweightCharts && LightweightCharts.createChart(el, {
+      autoSize: true, layout: { fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+      rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.06 } },
+      timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 5 },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      localization: { locale: 'ru-RU' }
+    });
+    const series = chart && chart.addCandlestickSeries();
+    let priceLines = [];
+    const factor = () => S.mode === 'mcap' && S.mcapFactor ? S.mcapFactor : 1;
+    const fmtAxis = v => S.mode === 'mcap' ? '$' + compact(v) : v.toFixed(6);
+    function applyFormat() {
+      if (!series) return;
+      series.applyOptions({ priceFormat: S.mode === 'mcap' ? { type: 'custom', formatter: fmtAxis, minMove: 1 } : { type: 'price', precision: 6, minMove: 0.000001 } });
+    }
+    const bar = c => { const f = factor(); return { time: c[0] + tz, open: c[1] * f, high: c[2] * f, low: c[3] * f, close: c[4] * f }; };
+
+    function allLines() {
+      const out = cfg.lines.slice();
+      for (const t of unallocated()) if (t.price && (t.type === 'BUY' || t.type === 'SELL')) {
+        const d = new Date((t.time + tz) * 1000);
+        out.push({ price: t.price, color: 'new', style: 'dashed', width: 1, title: `Новая ${t.type === 'BUY' ? 'покупка' : 'продажа'} ${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`, axis: true });
+      }
+      return out;
+    }
+    function drawLines() {
+      if (!series) return;
+      priceLines.forEach(l => series.removePriceLine(l)); priceLines = [];
+      const f = factor(), S_ = LightweightCharts.LineStyle;
+      for (const l of allLines()) priceLines.push(series.createPriceLine({
+        price: l.price * f, color: css(l.color), lineWidth: l.width || 1, lineStyle: l.style === 'dashed' ? S_.Dashed : S_.Solid,
+        axisLabelVisible: l.axis !== false, title: l.title || '' }));
+    }
+    function drawMarkers() {
+      if (!series || !S.candles.length) return;
+      const step = TF[S.tf][2], first = S.candles[0][0];
+      const marks = [];
+      for (const t of S.txs) {
+        if (!t.ok || !isWinTx(t) || t.time < first) continue;
+        const ty = TYPE[t.type] || TYPE.OTHER, un = after(t), buy = t.win > 0;
+        marks.push({ time: Math.floor(t.time / step) * step + tz, position: buy ? 'belowBar' : 'aboveBar', shape: buy ? 'arrowUp' : 'arrowDown',
+          color: css(un ? 'new' : buy ? (t.type === 'CLAIM' ? 'muted' : 'buy') : 'sell'), text: t.type === 'CLAIM' ? 'PRESALE' : ty[0], size: 1 });
+      }
+      marks.sort((a, b) => a.time - b.time);
+      series.setMarkers(marks);
+    }
+    function applyTheme() {
+      if (!chart) return;
+      chart.applyOptions({ layout: { background: { type: 'solid', color: css('panel') }, textColor: css('muted') },
+        grid: { vertLines: { color: css('grid') }, horzLines: { color: css('grid') } },
+        rightPriceScale: { borderColor: css('line') }, timeScale: { borderColor: css('line') } });
+      series.applyOptions({ upColor: css('up'), downColor: css('down'), borderUpColor: css('up'), borderDownColor: css('down'), wickUpColor: css('up'), wickDownColor: css('down') });
+      drawLines(); drawMarkers();
+    }
+    function renderLegend() {
+      $('legend').innerHTML = cfg.legend.map(l => `<span>${l.colors.map(c => `<i class="ln ${l.dashed ? 'dash' : ''}" style="border-color:var(--${c})"></i>`).join('')}${l.text}</span>`).join('')
+        + `<span><i class="ln dash" style="border-color:var(--new)"></i>Новые, не распределённые сделки</span>`;
+    }
+
+    let candleReq = 0;
+    async function loadCandles(fit) {
+      if (!series) return;
+      const my = ++candleReq, [unit, agg, step] = TF[S.tf];
+      const base = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${cfg.pair}/ohlcv/${unit}?aggregate=${agg}&limit=1000&currency=usd`;
+      try {
+        let list = [], before = '';
+        for (let page = 0; page < 4; page++) {
+          const r = await fetch(base + before, { headers: { Accept: 'application/json' } });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const rows = (await r.json()).data.attributes.ohlcv_list;
+          list = list.concat(rows);
+          const oldest = Math.min(...rows.map(x => x[0]));
+          if (rows.length < 1000 || oldest <= cfg.poolCreated) break;
+          before = '&before_timestamp=' + oldest;
+        }
+        if (my !== candleReq) return;
+        const seen = new Set();
+        list = list.filter(x => !seen.has(x[0]) && seen.add(x[0])).map(x => [x[0], x[1], x[2], x[3], x[4]]).sort((a, b) => a[0] - b[0]);
+        const tail = S.candles[S.candles.length - 1];
+        if (!fit && tail && list.length && tail[0] > list[list.length - 1][0]) list.push(tail);
+        S.candles = list;
+        series.setData(S.candles.map(bar));
+        drawMarkers();
+        if (fit) chart.timeScale().fitContent();
+      } catch (e) { /* keep current candles; retried on the next tick */ }
+    }
+    function liveBar() {
+      if (!series || !S.candles.length || !S.price) return;
+      const step = TF[S.tf][2], now = Math.floor(Date.now() / 1000 / step) * step, last = S.candles[S.candles.length - 1], P = S.price;
+      if (now > last[0]) S.candles.push([now, last[4], Math.max(last[4], P), Math.min(last[4], P), P]);
+      else { last[2] = Math.max(last[2], P); last[3] = Math.min(last[3], P); last[4] = P; }
+      series.update(bar(S.candles[S.candles.length - 1]));
+    }
+
+    $('tf').addEventListener('click', e => {
+      const b = e.target.closest('button[data-tf]'); if (!b || b.dataset.tf === S.tf) return;
+      S.tf = b.dataset.tf; store.set(TF_KEY, S.tf);
+      $('tf').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      S.candles = []; loadCandles(true);
+    });
+    $('mode').addEventListener('click', e => {
+      const b = e.target.closest('button[data-mode]'); if (!b || b.dataset.mode === S.mode) return;
+      S.mode = b.dataset.mode; store.set(MODE_KEY, S.mode);
+      $('mode').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      applyFormat(); series.setData(S.candles.map(bar)); drawLines(); drawMarkers();
+    });
+    $('mode').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.mode === S.mode)));
+
+    if (chart) chart.subscribeCrosshairMove(p => {
+      const b = p && p.time ? p.seriesData.get(series) : null;
+      if (!b) { $('ohlc').textContent = 'Наведите на свечу, чтобы увидеть цены'; return; }
+      const d = new Date(p.time * 1000), f = v => S.mode === 'mcap' ? '$' + compact(v) : v.toFixed(6), ch = (b.close / b.open - 1) * 100;
+      $('ohlc').innerHTML = `${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())} · O <b>${f(b.open)}</b> H <b>${f(b.high)}</b> L <b>${f(b.low)}</b> C <b>${f(b.close)}</b> <span class="${cls(ch)}">${sgn(ch)}%</span>`;
+    });
+    $('ohlc').textContent = 'Наведите на свечу, чтобы увидеть цены';
+
+    // ----- live loops -----
+    async function tickPrice() {
+      try {
+        const r = await fetch('https://api.dexscreener.com/latest/dex/pairs/solana/' + cfg.pair, { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const p = (await r.json()).pairs[0], P = parseFloat(p.priceUsd);
+        if (!(P > 0)) throw new Error('no price');
+        const oldFactor = S.mcapFactor;
+        S.price = P; if (p.marketCap) S.mcapFactor = p.marketCap / P;
+        S.priceAt = new Date(); S.priceErr = false;
+        if (S.mode === 'mcap' && oldFactor !== S.mcapFactor && series) { series.setData(S.candles.map(bar)); drawLines(); }
+        liveBar(); renderTiles(); renderLedger();
+      } catch (e) { S.priceErr = true; }
+      renderStatus();
+    }
+    let walletBusy = false;
+    async function tickWallet() {
+      if (walletBusy) return; walletBusy = true;
+      try {
+        const k = known(), fresh = new Map();
+        for (const a of [cfg.wallet, ...(cfg.tokenAccounts || [])]) {
+          for (const s of await L.signaturesSince(RPC, a, k, k.size ? 25 : 1000)) fresh.set(s.signature, s);
+        }
+        let added = 0;
+        for (const sig of fresh.keys()) {
+          const tx = await L.fetchTx(RPC, sig);
+          if (tx) { S.txs.push(L.parseTx(tx, cfg)); added++; }
+        }
+        S.balances = await L.balances(RPC, cfg);
+        S.walletAt = new Date(); S.walletErr = false;
+        if (added) { drawLines(); drawMarkers(); }
+        renderTiles(); renderLedger();
+      } catch (e) { S.walletErr = true; }
+      walletBusy = false; renderStatus();
+    }
+    async function reloadJournal() {
+      try {
+        const w = await L.decryptJSON(await loadBox('wallet.enc'), S.pw);
+        const k = known(); let added = 0;
+        for (const t of w.txs) if (!k.has(t.sig)) { S.txs.push(t); added++; }
+        S.syncedAt = w.syncedAt; if (!S.balances) S.balances = w.balances;
+        if (added) { drawLines(); drawMarkers(); renderTiles(); renderLedger(); }
+        renderStatus();
+      } catch (e) { /* keep what we have */ }
+    }
+
+    $('notes').innerHTML = cfg.notesHtml;
+    renderLegend(); applyFormat(); applyTheme();
+    renderTiles(); renderLedger(); renderStatus();
+    try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) {}
+    new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    loadCandles(true).then(tickPrice);
+    tickWallet();
+    setInterval(tickPrice, 15000);
+    setInterval(() => loadCandles(false), 60000);
+    setInterval(tickWallet, 60000);
+    setInterval(reloadJournal, 300000);
+  }
+})();
+</script>
+</body>
+</html>

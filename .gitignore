@@ -1,0 +1,4 @@
+# plaintext configs and passwords never go into the repo
+*.json
+*.txt
+node_modules/
