@@ -253,16 +253,29 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
 
     const known = () => new Set(S.txs.map(t => t.sig));
     const after = t => t.time > cfg.cutoff.time && t.sig !== cfg.cutoff.sig;
-    const unallocated = () => S.txs.filter(t => t.ok && after(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9));
+    // Tokens arriving after an already-split order was placed are that order's fill.
+    const isFill = t => t.ok && t.type === 'WIN_IN' && after(t) && (cfg.escrows || []).some(e => e.split && t.time > e.created);
+    const unallocated = () => S.txs.filter(t => t.ok && after(t) && !isFill(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9));
 
-    // Open limit orders: config gives price and size, the chain gives what is still in the vault.
+    // Open limit orders: config gives price, size and split, the chain gives what is still in the vault.
     // An order counts as filled once its USDC has left the vault.
     function escrowState() {
       const live = (S.balances && S.balances.escrow) || [];
       return (cfg.escrows || []).map(e => {
         const l = live.find(x => x.id === e.id) || { usdc: e.amount, win: 0 };
-        return { ...e, usdc: l.usdc, win: l.win, filled: l.usdc < 0.01 };
+        const fillWin = S.txs.filter(t => isFill(t) && t.time > e.created).reduce((a, t) => a + t.win, 0);
+        const got = l.win + fillWin;
+        return { ...e, usdc: l.usdc, win: l.win, fillWin, filled: l.usdc < 0.01, fillPrice: got > 0 ? (e.amount - l.usdc) / got : null };
       });
+    }
+    // A person's share of every split order: USDC still waiting, tokens received, USDC already spent.
+    function orderShare(id) {
+      const r = { usdc: 0, win: 0, spent: 0 };
+      for (const e of escrowState()) {
+        const s = (e.split && e.split[id]) || 0;
+        r.usdc += s * e.usdc; r.win += s * (e.win + e.fillWin); r.spent += s * (e.amount - e.usdc);
+      }
+      return r;
     }
 
     // ----- tiles & banner -----
@@ -270,16 +283,18 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       const P = S.price, tiles = $('tiles'); let html = '';
       let alloc = 0;
       for (const p of people) {
-        const pos = cfg.positions[p.id];
+        const pos = cfg.positions[p.id], o = orderShare(p.id);
         alloc += pos.tok;
-        const val = pos.tok * P + (pos.usdc || 0), unr = pos.tok * P - pos.cost, pnl = unr + pos.realized;
+        const tok = pos.tok + o.win, usdc = (pos.usdc || 0) + o.usdc, cost = pos.cost + o.spent;
+        const val = tok * P + usdc, unr = tok * P - cost, pnl = unr + pos.realized;
         html += `<div class="tile"><div class="tile-head"><i class="sw" style="background:var(--${p.color})"></i>${p.name}</div>
           <div class="big ${cls(pnl)}">${P ? sgn(pnl) + ' USDC <small>(' + sgn(pnl / pos.invested * 100, 1) + '%)</small>' : '…'}</div>
           <dl class="kv"><dt>Вложено</dt><dd>${fmt(pos.invested)} USDC</dd>
-          <dt>${SYM}</dt><dd>${fmt(pos.tok)}</dd>
-          ${pos.usdc ? `<dt>USDC</dt><dd>${fmt(pos.usdc)}</dd>` : ''}
-          ${pos.tok > 0 ? `<dt>Средняя цена</dt><dd>$${(pos.cost / pos.tok).toFixed(6)}</dd>
-          <dt>Безубыток</dt><dd>$${Math.max(0, (pos.invested - (pos.usdc || 0)) / pos.tok).toFixed(6)}</dd>` : ''}
+          <dt>${SYM}</dt><dd>${fmt(tok)}</dd>
+          ${pos.usdc ? `<dt>USDC на кошельке</dt><dd>${fmt(pos.usdc)}</dd>` : ''}
+          ${o.usdc > 0.005 ? `<dt>USDC в лимитке</dt><dd>${fmt(o.usdc)}</dd>` : ''}
+          ${tok > 0 ? `<dt>Средняя цена</dt><dd>$${(cost / tok).toFixed(6)}</dd>
+          <dt>Безубыток</dt><dd>${pos.invested - usdc > 0 ? '$' + ((pos.invested - usdc) / tok).toFixed(6) : 'в плюсе при любой цене'}</dd>` : ''}
           <dt>Стоимость</dt><dd>${fmt(val)} USDC</dd>
           <dt>Реализовано</dt><dd class="${cls(pos.realized)}">${sgn(pos.realized)}</dd>
           <dt>Не реализовано</dt><dd class="${cls(unr)}">${sgn(unr)}</dd></dl></div>`;
@@ -303,7 +318,9 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
           <dl class="kv"><dt>Статус</dt><dd>${e.filled ? 'исполнен' : 'ждёт цены'}</dd>
           <dt>В ордере USDC</dt><dd>${fmt(e.usdc)}</dd><dt>В ордере ${SYM}</dt><dd>${fmt(e.win)}</dd>
           ${!e.filled && P ? `<dt>До цены ордера</dt><dd>${sgn((e.price / P - 1) * 100, 1)}%</dd>` : ''}
-          ${!e.filled ? `<dt>Получим примерно</dt><dd>${fmt(e.amount / e.price)} ${SYM}</dd>` : ''}</dl>
+          ${!e.filled ? `<dt>Получим примерно</dt><dd>${fmt(e.amount / e.price)} ${SYM}</dd>` : ''}
+          ${e.fillPrice ? `<dt>Получено</dt><dd>${fmt(e.win + e.fillWin)} ${SYM}</dd><dt>Цена исполнения</dt><dd>$${e.fillPrice.toFixed(6)}</dd>` : ''}
+          ${e.split ? `<dt>Чьё</dt><dd>${people.map(p => p.name + ' ' + fmt((e.split[p.id] || 0) * 100) + '%').join(' · ')}</dd>` : ''}</dl>
           <p class="sub" style="font-size:13px;margin:0">Цена ордера записана со слов владельца: Jupiter хранит её у себя. В блокчейне видны деньги в хранилище ордера.</p></div>`;
       }
       const tot = people.reduce((a, p) => a + cfg.positions[p.id].invested, 0);
@@ -321,7 +338,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       // balance check: allocated + unallocated must equal what the chain says
       const banner = $('banner');
       if (b) {
-        const expW = alloc + uw, expU = people.reduce((a, p) => a + (cfg.positions[p.id].usdc || 0), 0) + uu;
+        const expW = alloc + uw + esc.reduce((a, e) => a + e.fillWin, 0), expU = people.reduce((a, p) => a + (cfg.positions[p.id].usdc || 0), 0) + uu;
         const dW = b.win - expW, dU = b.usdc - expU;
         if (Math.abs(dW) > 1e-6 || Math.abs(dU) > 1e-4) {
           banner.hidden = false;
@@ -340,7 +357,8 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       const rows = S.txs.slice().sort((a, b) => b.time - a.time)
         .filter(t => !only || isWinTx(t) || (cfg.notes[t.sig] && cfg.notes[t.sig].trade));
       $('ledger').innerHTML = rows.map(t => {
-        const note = cfg.notes[t.sig] || {}, ty = TYPE[t.type] || TYPE.OTHER, un = t.ok && after(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9);
+        const note = cfg.notes[t.sig] || {}, ty = TYPE[t.type] || TYPE.OTHER, fill = isFill(t), un = !fill && t.ok && after(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9);
+        if (fill && !note.label) { note.label = 'Исполнение лимитки'; note.owner = people.map(p => p.id); note.ownerLabel = 'по долям лимитки'; }
         const d = new Date((t.time + tz) * 1000);
         const date = `${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
         const who = un ? `<span class="who"><i class="sw" style="background:var(--new)"></i>не распределено</span>`
@@ -393,8 +411,10 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
 
     function allLines() {
       const out = cfg.lines.slice();
-      for (const e of escrowState()) if (!e.filled)
-        out.push({ price: e.price, color: 'new', style: 'dashed', width: 2, title: `Лимитка ${e.side === 'BUY' ? 'BUY' : 'SELL'} $${e.price} · ${fmt(e.amount, 0)} USDC`, axis: true });
+      for (const e of escrowState()) {
+        if (!e.filled) out.push({ price: e.price, color: 'new', style: 'dashed', width: 2, title: `Лимитка ${e.side === 'BUY' ? 'BUY' : 'SELL'} $${e.price} · ${fmt(e.amount, 0)} USDC`, axis: true });
+        else if (e.fillPrice) out.push({ price: e.fillPrice, color: 'buy', style: 'dashed', width: 1, title: `Лимитка исполнена $${e.fillPrice.toFixed(5)}`, axis: true });
+      }
       for (const t of unallocated()) if (t.price && (t.type === 'BUY' || t.type === 'SELL')) {
         const d = new Date((t.time + tz) * 1000);
         out.push({ price: t.price, color: 'new', style: 'dashed', width: 1, title: `Новая ${t.type === 'BUY' ? 'покупка' : 'продажа'} ${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`, axis: true });
