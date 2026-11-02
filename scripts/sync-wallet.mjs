@@ -6,7 +6,7 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 await import(pathToFileURL(path.join(root, 'docs', 'lib.js')).href);
-const { decryptJSON, encryptJSON, signaturesSince, fetchTx, parseTx, balances } = globalThis.WalletLib;
+const { decryptJSON, encryptJSON, signaturesSince, fetchTx, parseTx, balances, watchedAddresses } = globalThis.WalletLib;
 
 const password = process.env.BOARD_PASSWORD;
 if (!password) { console.error('BOARD_PASSWORD is not set'); process.exit(1); }
@@ -19,7 +19,7 @@ let prev = { txs: [], balances: null };
 try { prev = await decryptJSON(await readBox('wallet.enc'), password); } catch { console.log('no previous wallet.enc, full sync'); }
 
 const known = new Set(prev.txs.map(t => t.sig));
-const addresses = [cfg.wallet, ...(cfg.tokenAccounts || [])];
+const addresses = watchedAddresses(cfg);
 const fresh = new Map();
 for (const a of addresses) {
   const limit = known.size ? 50 : 1000;
@@ -36,7 +36,8 @@ const bal = await balances(RPC, cfg);
 
 const same = added.length === 0 && prev.balances &&
   Math.abs(prev.balances.win - bal.win) < 1e-9 && Math.abs(prev.balances.usdc - bal.usdc) < 1e-9 &&
-  Math.abs(prev.balances.sol - bal.sol) < 1e-9;
+  Math.abs(prev.balances.sol - bal.sol) < 1e-9 &&
+  JSON.stringify(prev.balances.escrow || []) === JSON.stringify(bal.escrow || []);
 if (same) { console.log('no changes'); process.exit(0); }
 
 const next = { txs, balances: bal, syncedAt: Math.floor(Date.now() / 1000) };

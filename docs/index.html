@@ -255,6 +255,16 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
     const after = t => t.time > cfg.cutoff.time && t.sig !== cfg.cutoff.sig;
     const unallocated = () => S.txs.filter(t => t.ok && after(t) && (isWinTx(t) || Math.abs(t.usdc) > 1e-9));
 
+    // Open limit orders: config gives price and size, the chain gives what is still in the vault.
+    // An order counts as filled once its USDC has left the vault.
+    function escrowState() {
+      const live = (S.balances && S.balances.escrow) || [];
+      return (cfg.escrows || []).map(e => {
+        const l = live.find(x => x.id === e.id) || { usdc: e.amount, win: 0 };
+        return { ...e, usdc: l.usdc, win: l.win, filled: l.usdc < 0.01 };
+      });
+    }
+
     // ----- tiles & banner -----
     function renderTiles() {
       const P = S.price, tiles = $('tiles'); let html = '';
@@ -276,20 +286,33 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       }
       const un = unallocated();
       const uw = un.reduce((a, t) => a + t.win, 0), uu = un.reduce((a, t) => a + t.usdc, 0);
+      const b = S.balances;
+      const esc = escrowState(), escU = esc.reduce((a, e) => a + e.usdc, 0), escW = esc.reduce((a, e) => a + e.win, 0);
       if (un.length) {
+        const net = uw * P + uu + escU + escW * P;
         html += `<div class="tile new"><div class="tile-head"><i class="sw" style="background:var(--new)"></i>Не распределено</div>
           <div class="big">${sgn(uw)} ${SYM}</div>
-          <dl class="kv"><dt>Сделок</dt><dd>${un.length}</dd><dt>USDC</dt><dd>${sgn(uu)}</dd>
-          <dt>Стоимость ${SYM}</dt><dd>${fmt(uw * P)} USDC</dd><dt>Итог (${SYM} + USDC)</dt><dd class="${cls(uw * P + uu)}">${sgn(uw * P + uu)}</dd></dl>
+          <dl class="kv"><dt>Сделок</dt><dd>${un.length}</dd><dt>USDC из кошелька</dt><dd>${sgn(uu)}</dd>
+          ${esc.length ? `<dt>Из них в лимитке</dt><dd>${fmt(escU)} USDC${escW ? ' + ' + fmt(escW) + ' ' + SYM : ''}</dd>` : ''}
+          <dt>Стоимость ${SYM}</dt><dd>${fmt(uw * P)} USDC</dd><dt>Итог по ним</dt><dd class="${cls(net)}">${sgn(net)}</dd></dl>
           <p class="sub" style="font-size:13px;margin:0">Сделки после ${cfg.cutoff.label}. Их нужно поделить вручную.</p></div>`;
       }
-      const b = S.balances;
+      for (const e of esc) {
+        html += `<div class="tile new"><div class="tile-head"><i class="sw" style="background:var(--new)"></i>${e.label}</div>
+          <div class="big">${e.side === 'BUY' ? 'Купить' : 'Продать'} по $${e.price}</div>
+          <dl class="kv"><dt>Статус</dt><dd>${e.filled ? 'исполнен' : 'ждёт цены'}</dd>
+          <dt>В ордере USDC</dt><dd>${fmt(e.usdc)}</dd><dt>В ордере ${SYM}</dt><dd>${fmt(e.win)}</dd>
+          ${!e.filled && P ? `<dt>До цены ордера</dt><dd>${sgn((e.price / P - 1) * 100, 1)}%</dd>` : ''}
+          ${!e.filled ? `<dt>Получим примерно</dt><dd>${fmt(e.amount / e.price)} ${SYM}</dd>` : ''}</dl>
+          <p class="sub" style="font-size:13px;margin:0">Цена ордера записана со слов владельца: Jupiter хранит её у себя. В блокчейне видны деньги в хранилище ордера.</p></div>`;
+      }
       const tot = people.reduce((a, p) => a + cfg.positions[p.id].invested, 0);
-      const wv = b ? b.win * P + b.usdc : 0;
+      const wv = b ? b.win * P + b.usdc + escU + escW * P : 0;
       html += `<div class="tile"><div class="tile-head">Кошелёк целиком</div>
         <div class="big ${cls(wv - tot)}">${b && P ? sgn(wv - tot) + ' USDC <small>(' + sgn((wv - tot) / tot * 100, 1) + '%)</small>' : '…'}</div>
         <dl class="kv"><dt>Вложено</dt><dd>${fmt(tot)} USDC</dd>
         <dt>${SYM}</dt><dd>${b ? fmt(b.win) : '…'}</dd><dt>USDC</dt><dd>${b ? fmt(b.usdc) : '…'}</dd>
+        ${esc.length ? `<dt>В лимитках</dt><dd>${fmt(escU)} USDC${escW ? ' + ' + fmt(escW) + ' ' + SYM : ''}</dd>` : ''}
         <dt>SOL на газ</dt><dd>${b ? fmt(b.sol, 4) : '…'}</dd>
         <dt>Стоимость</dt><dd>${b ? fmt(wv) + ' USDC' : '…'}</dd>
         <dt>Цена ${SYM}</dt><dd>${P ? '$' + P.toFixed(6) : '…'}</dd></dl></div>`;
@@ -305,7 +328,8 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
           banner.innerHTML = `<b>Баланс кошелька не сходится с журналом:</b> разница ${sgn(dW, 6)} ${SYM}, ${sgn(dU, 4)} USDC. Скорее всего, новая транзакция ещё не подтянулась, страница проверит снова через минуту.`;
         } else if (un.length) {
           banner.hidden = false;
-          banner.innerHTML = `<b>Есть новые сделки (${un.length}), они ещё не поделены между участниками.</b> Они показаны отдельно, в фиолетовой плитке и в журнале.`;
+          const open = esc.filter(e => !e.filled).map(e => `лимитка ${e.side === 'BUY' ? 'на покупку' : 'на продажу'} по $${e.price} ждёт цены`);
+          banner.innerHTML = `<b>Есть новые сделки (${un.length}), они ещё не поделены между участниками.</b> Они показаны отдельно, в фиолетовой плитке и в журнале.${open.length ? ' Сейчас ' + open.join(', ') + '.' : ''}`;
         } else banner.hidden = true;
       }
     }
@@ -369,6 +393,8 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
 
     function allLines() {
       const out = cfg.lines.slice();
+      for (const e of escrowState()) if (!e.filled)
+        out.push({ price: e.price, color: 'new', style: 'dashed', width: 2, title: `Лимитка ${e.side === 'BUY' ? 'BUY' : 'SELL'} $${e.price} · ${fmt(e.amount, 0)} USDC`, axis: true });
       for (const t of unallocated()) if (t.price && (t.type === 'BUY' || t.type === 'SELL')) {
         const d = new Date((t.time + tz) * 1000);
         out.push({ price: t.price, color: 'new', style: 'dashed', width: 1, title: `Новая ${t.type === 'BUY' ? 'покупка' : 'продажа'} ${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`, axis: true });
@@ -486,7 +512,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       if (walletBusy) return; walletBusy = true;
       try {
         const k = known(), fresh = new Map();
-        for (const a of [cfg.wallet, ...(cfg.tokenAccounts || [])]) {
+        for (const a of L.watchedAddresses(cfg)) {
           for (const s of await L.signaturesSince(RPC, a, k, k.size ? 25 : 1000)) fresh.set(s.signature, s);
         }
         let added = 0;
@@ -496,7 +522,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
         }
         S.balances = await L.balances(RPC, cfg);
         S.walletAt = new Date(); S.walletErr = false;
-        if (added) { drawLines(); drawMarkers(); }
+        drawLines(); if (added) drawMarkers();   // order lines follow the vault balance
         renderTiles(); renderLedger();
       } catch (e) { S.walletErr = true; }
       walletBusy = false; renderStatus();

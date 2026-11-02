@@ -108,21 +108,28 @@
     return rpc(url, 'getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]);
   }
   // getMultipleAccounts works on public nodes that refuse indexed calls like getTokenAccountsByOwner.
+  // Escrows are vaults of open limit orders (e.g. Jupiter): money that left the wallet but is still ours.
   async function balances(url, cfg) {
-    const accs = [...cfg.tokenAccounts, cfg.wallet];
+    const escrows = cfg.escrows || [];
+    const escrowAccs = escrows.flatMap(e => [e.usdcAccount, e.winAccount]);
+    const accs = [...cfg.tokenAccounts, cfg.wallet, ...escrowAccs];
     const r = await rpc(url, 'getMultipleAccounts', [accs, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-    const out = { win: 0, usdc: 0, sol: 0 };
+    const out = { win: 0, usdc: 0, sol: 0, escrow: escrows.map(e => ({ id: e.id, usdc: 0, win: 0 })) };
     r.value.forEach((a, i) => {
       if (!a) return;
       if (accs[i] === cfg.wallet) { out.sol = a.lamports / 1e9; return; }
       const info = a.data && a.data.parsed && a.data.parsed.info;
-      if (!info || info.owner !== cfg.wallet) return;
+      if (!info) return;
       const amt = Number(info.tokenAmount.uiAmountString);
-      if (info.mint === cfg.mintWin) out.win += amt;
-      if (info.mint === cfg.mintUsdc) out.usdc += amt;
+      const k = info.mint === cfg.mintWin ? 'win' : info.mint === cfg.mintUsdc ? 'usdc' : null;
+      if (!k) return;
+      if (info.owner === cfg.wallet) { out[k] += amt; return; }
+      const ei = escrows.findIndex(e => e.owner === info.owner && (e.usdcAccount === accs[i] || e.winAccount === accs[i]));
+      if (ei >= 0) out.escrow[ei][k] += amt;
     });
     return out;
   }
+  const watchedAddresses = cfg => [cfg.wallet, ...(cfg.tokenAccounts || []), ...(cfg.escrows || []).flatMap(e => [e.usdcAccount, e.winAccount])];
 
-  root.WalletLib = { encryptJSON, decryptJSON, rpc, parseTx, classify, signaturesSince, fetchTx, balances };
+  root.WalletLib = { encryptJSON, decryptJSON, rpc, parseTx, classify, signaturesSince, fetchTx, balances, watchedAddresses };
 })(globalThis);
