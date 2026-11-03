@@ -12,18 +12,18 @@
 /* Layout: gate card → header with live status → owner tiles → chart (timeframes, Price/MCap) → ledger table → notes */
 :root {
   --bg: #f4f6f8; --panel: #ffffff; --fg: #141a22; --muted: #5b6672; --line: #dfe4ea; --grid: #edf0f3;
-  --vadim: #B77900; --emil: #C2257E; --buy: #1C7FBF; --sell: #C9392E; --new: #6b4fd8;
+  --vadim: #B77900; --emil: #C2257E; --buy: #1C7FBF; --sell: #C9392E; --new: #6b4fd8; --pct: #0b8597;
   --up: #17895c; --down: #c63d33; --pos: #13784f; --neg: #b3362c; --warn-bg: #fff4d6; --warn-fg: #6b4b00;
   --font-body: "Manrope", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #0e1116; --panel: #151a21; --fg: #e4e9ef; --muted: #8d98a5; --line: #252d37; --grid: #1c232c;
-  --vadim: #B07A0E; --emil: #D94D95; --buy: #3592CC; --sell: #E5574B; --new: #9a85f0;
+  --vadim: #B07A0E; --emil: #D94D95; --buy: #3592CC; --sell: #E5574B; --new: #9a85f0; --pct: #3cc7d9;
   --up: #2bb37f; --down: #e0574b; --pos: #3cc58f; --neg: #f07368; --warn-bg: #3a2f10; --warn-fg: #f3d58a; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #0e1116; --panel: #151a21; --fg: #e4e9ef; --muted: #8d98a5; --line: #252d37; --grid: #1c232c;
-  --vadim: #B07A0E; --emil: #D94D95; --buy: #3592CC; --sell: #E5574B; --new: #9a85f0;
+  --vadim: #B07A0E; --emil: #D94D95; --buy: #3592CC; --sell: #E5574B; --new: #9a85f0; --pct: #3cc7d9;
   --up: #2bb37f; --down: #e0574b; --pos: #3cc58f; --neg: #f07368; --warn-bg: #3a2f10; --warn-fg: #f3d58a; color-scheme: dark }
 
 * { box-sizing: border-box; }
@@ -102,6 +102,7 @@ button, input { font: inherit; }
 /* line names sit on the left edge of the chart; the price axis keeps only the numbers */
 .plabels { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
 .plabel { position: absolute; left: 6px; top: 0; font: 600 11px/16px var(--font-mono); color: #fff; padding: 0 6px; border-radius: 3px; white-space: nowrap; opacity: .92; }
+.plabel.pct { left: auto; padding: 0; color: var(--pct); background: none; }
 
 /* table */
 section { display: grid; gap: 12px; min-width: 0; }
@@ -291,15 +292,18 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       }
       return r;
     }
+    // Common average cost of everything allocated, orders included.
+    function avgCost() {
+      let tok = 0, cost = 0;
+      for (const p of people) { const pos = cfg.positions[p.id], o = orderShare(p.id); tok += pos.tok + o.win; cost += pos.cost + o.spent; }
+      return tok > 0 ? { tok, cost, avg: cost / tok } : { tok: 0, cost: 0, avg: 0 };
+    }
 
     // ----- tiles & banner -----
     function renderTiles() {
       const P = S.price, tiles = $('tiles'); let html = '';
-      let alloc = 0, allTok = 0, allCost = 0;
-      for (const p of people) {
-        const pos = cfg.positions[p.id], o = orderShare(p.id);
-        allTok += pos.tok + o.win; allCost += pos.cost + o.spent;
-      }
+      let alloc = 0;
+      const { tok: allTok, cost: allCost } = avgCost();
       for (const p of people) {
         const pos = cfg.positions[p.id], o = orderShare(p.id);
         alloc += pos.tok;
@@ -439,6 +443,9 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
         const d = new Date((t.time + tz) * 1000);
         out.push({ price: t.price, color: 'new', style: 'dashed', width: 1, title: `Новая ${t.type === 'BUY' ? 'покупка' : 'продажа'} ${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`, axis: true });
       }
+      // % levels from the common average; their names go on the right edge
+      const avg = avgCost().avg;
+      if (avg) for (const p of cfg.pctGrid || []) out.push({ price: avg * (1 + p / 100), color: 'pct', style: 'dotted', width: 1, axis: false, side: 'right', title: (p > 0 ? '+' : '−') + Math.abs(p) + '%' });
       return out;
     }
     // Line names go into an overlay on the left edge, kept apart vertically so they never overlap.
@@ -457,25 +464,32 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
           axisLabelVisible: l.axis !== false, title: '' }));
         if (!l.title) continue;
         const node = document.createElement('div');
-        node.className = 'plabel'; node.textContent = l.title;
-        node.style.background = css(l.color); if (l.color === 'fg') node.style.color = css('bg');
-        labelBox.appendChild(node); labels.push({ price: l.price * f, node });
+        node.textContent = l.title;
+        if (l.side === 'right') node.className = 'plabel pct';
+        else { node.className = 'plabel'; node.style.background = css(l.color); if (l.color === 'fg') node.style.color = css('bg'); }
+        labelBox.appendChild(node); labels.push({ price: l.price * f, node, side: l.side || 'left' });
       }
     }
     function placeLabels() {
       requestAnimationFrame(placeLabels);
       if (!series || !labels.length) return;
-      const paneH = el.clientHeight - chart.timeScale().height(), H = 17;
+      const paneH = el.clientHeight - chart.timeScale().height(), H = 17, axisW = chart.priceScale('right').width();
       const items = labels.map(l => ({ l, y: series.priceToCoordinate(l.price) }));
-      const sig = paneH + '|' + items.map(i => i.y == null ? 'x' : Math.round(i.y)).join(',');
+      const sig = paneH + '|' + axisW + '|' + items.map(i => i.y == null ? 'x' : Math.round(i.y)).join(',');
       if (sig === labelSig) return; labelSig = sig;
-      const vis = items.filter(i => i.y != null && i.y >= 0 && i.y <= paneH).sort((a, b) => a.y - b.y);
-      for (const i of items) i.l.node.hidden = !vis.includes(i);
-      let top = -Infinity;
-      for (const i of vis) { i.top = Math.max(i.y - H / 2, top + H); top = i.top; }
-      let bottom = paneH - H;
-      for (let k = vis.length - 1; k >= 0; k--) { vis[k].top = Math.min(vis[k].top, bottom); bottom = vis[k].top - H; }
-      for (const i of vis) i.l.node.style.transform = `translateY(${Math.round(i.top)}px)`;
+      for (const side of ['left', 'right']) {   // each edge is stacked on its own
+        const own = items.filter(i => i.l.side === side);
+        const vis = own.filter(i => i.y != null && i.y >= 0 && i.y <= paneH).sort((a, b) => a.y - b.y);
+        for (const i of own) i.l.node.hidden = !vis.includes(i);
+        let top = -Infinity;
+        for (const i of vis) { i.top = Math.max(i.y - H / 2, top + H); top = i.top; }
+        let bottom = paneH - H;
+        for (let k = vis.length - 1; k >= 0; k--) { vis[k].top = Math.min(vis[k].top, bottom); bottom = vis[k].top - H; }
+        for (const i of vis) {
+          i.l.node.style.transform = `translateY(${Math.round(i.top)}px)`;
+          if (side === 'right') i.l.node.style.right = (axisW + 6) + 'px';
+        }
+      }
     }
     if (chart) requestAnimationFrame(placeLabels);
     function drawMarkers() {
