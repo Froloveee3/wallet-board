@@ -61,6 +61,15 @@ button, input { font: inherit; }
 .banner { background: var(--warn-bg); color: var(--warn-fg); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
 .banner b { font-weight: 700; }
 
+/* hero: what the wallet holds right now */
+.hero { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.stat { padding: 16px 20px; display: grid; gap: 4px; align-content: start; min-width: 0; border-left: 1px solid var(--line); }
+.stat:first-child { border-left: 0; }
+.stat .lbl { font-size: 13px; color: var(--muted); font-weight: 600; }
+.stat .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: clamp(22px, 3vw, 30px); font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
+.stat .hint { font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .stat { border-left: 0; border-top: 1px solid var(--line); } .stat:first-child { border-top: 0; } }
+
 /* tiles */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
@@ -89,6 +98,10 @@ button, input { font: inherit; }
 .legend span { display: inline-flex; align-items: center; gap: 7px; }
 .ln { width: 22px; height: 0; border-top: 2px solid; display: inline-block; }
 .ln.dash { border-top-style: dashed; }
+.ln.dot { border-top-style: dotted; }
+/* line names sit on the left edge of the chart; the price axis keeps only the numbers */
+.plabels { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
+.plabel { position: absolute; left: 6px; top: 0; font: 600 11px/16px var(--font-mono); color: #fff; padding: 0 6px; border-radius: 3px; white-space: nowrap; opacity: .92; }
 
 /* table */
 section { display: grid; gap: 12px; min-width: 0; }
@@ -141,6 +154,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
   </div>
 
   <div class="banner" id="banner" hidden></div>
+  <div class="hero" id="hero"></div>
   <div class="tiles" id="tiles"></div>
 
   <div class="card">
@@ -281,7 +295,11 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
     // ----- tiles & banner -----
     function renderTiles() {
       const P = S.price, tiles = $('tiles'); let html = '';
-      let alloc = 0;
+      let alloc = 0, allTok = 0, allCost = 0;
+      for (const p of people) {
+        const pos = cfg.positions[p.id], o = orderShare(p.id);
+        allTok += pos.tok + o.win; allCost += pos.cost + o.spent;
+      }
       for (const p of people) {
         const pos = cfg.positions[p.id], o = orderShare(p.id);
         alloc += pos.tok;
@@ -290,7 +308,8 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
         html += `<div class="tile"><div class="tile-head"><i class="sw" style="background:var(--${p.color})"></i>${p.name}</div>
           <div class="big ${cls(pnl)}">${P ? sgn(pnl) + ' USDC <small>(' + sgn(pnl / pos.invested * 100, 1) + '%)</small>' : '…'}</div>
           <dl class="kv"><dt>Вложено</dt><dd>${fmt(pos.invested)} USDC</dd>
-          <dt>${SYM}</dt><dd>${fmt(tok)}</dd>
+          ${allTok > 0 ? `<dt>Доля в токене</dt><dd>${fmt(tok / allTok * 100)}%</dd>` : ''}
+          <dt>${SYM}</dt><dd><b>${fmt(tok)}</b></dd>
           ${pos.usdc ? `<dt>USDC на кошельке</dt><dd>${fmt(pos.usdc)}</dd>` : ''}
           ${o.usdc > 0.005 ? `<dt>USDC в лимитке</dt><dd>${fmt(o.usdc)}</dd>` : ''}
           ${tok > 0 ? `<dt>Средняя цена</dt><dd>$${(cost / tok).toFixed(6)}</dd>
@@ -323,17 +342,18 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
           ${e.split ? `<dt>Чьё</dt><dd>${people.map(p => p.name + ' ' + fmt((e.split[p.id] || 0) * 100) + '%').join(' · ')}</dd>` : ''}</dl>
           <p class="sub" style="font-size:13px;margin:0">Цена ордера записана со слов владельца: Jupiter хранит её у себя. В блокчейне видны деньги в хранилище ордера.</p></div>`;
       }
-      const tot = people.reduce((a, p) => a + cfg.positions[p.id].invested, 0);
-      const wv = b ? b.win * P + b.usdc + escU + escW * P : 0;
-      html += `<div class="tile"><div class="tile-head">Кошелёк целиком</div>
-        <div class="big ${cls(wv - tot)}">${b && P ? sgn(wv - tot) + ' USDC <small>(' + sgn((wv - tot) / tot * 100, 1) + '%)</small>' : '…'}</div>
-        <dl class="kv"><dt>Вложено</dt><dd>${fmt(tot)} USDC</dd>
-        <dt>${SYM}</dt><dd>${b ? fmt(b.win) : '…'}</dd><dt>USDC</dt><dd>${b ? fmt(b.usdc) : '…'}</dd>
-        ${esc.length ? `<dt>В лимитках</dt><dd>${fmt(escU)} USDC${escW ? ' + ' + fmt(escW) + ' ' + SYM : ''}</dd>` : ''}
-        <dt>SOL на газ</dt><dd>${b ? fmt(b.sol, 4) : '…'}</dd>
-        <dt>Стоимость</dt><dd>${b ? fmt(wv) + ' USDC' : '…'}</dd>
-        <dt>Цена ${SYM}</dt><dd>${P ? '$' + P.toFixed(6) : '…'}</dd></dl></div>`;
       tiles.innerHTML = html;
+
+      // hero: the whole wallet at a glance
+      const tot = people.reduce((a, p) => a + cfg.positions[p.id].invested, 0);
+      const wv = b ? b.win * P + b.usdc + escU + escW * P : 0, avg = allTok > 0 ? allCost / allTok : 0;
+      const stat = (lbl, val, hint, c = '') => `<div class="stat"><div class="lbl">${lbl}</div><div class="val ${c}">${val}</div><div class="hint">${hint}</div></div>`;
+      $('hero').innerHTML =
+        stat(`${SYM} на кошельке`, b ? fmt(b.win) : '…', b && P ? `≈ ${fmt(b.win * P)} USDC` : '')
+        + stat('USDC на кошельке', b ? fmt(b.usdc) : '…', (escU > 0.005 ? `+ ${fmt(escU)} в лимитках · ` : '') + (b ? `SOL на газ ${fmt(b.sol, 4)}` : ''))
+        + stat(`Цена ${SYM}`, P ? '$' + P.toFixed(6) : '…', P && S.mcapFactor ? `MCap $${compact(P * S.mcapFactor)}` : '')
+        + stat('Средняя цена', avg ? '$' + avg.toFixed(6) : '—', avg && P ? `цена ${sgn((P / avg - 1) * 100, 1)}% от средней` : '', avg && P ? cls(P - avg) : '')
+        + stat('Итог кошелька', b && P ? sgn(wv - tot) + ' USDC' : '…', b && P ? `${sgn((wv - tot) / tot * 100, 1)}% · вложено ${fmt(tot, 0)} · сейчас ${fmt(wv)}` : '', b && P ? cls(wv - tot) : '');
 
       // balance check: allocated + unallocated must equal what the chain says
       const banner = $('banner');
@@ -421,23 +441,58 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       }
       return out;
     }
+    // Line names go into an overlay on the left edge, kept apart vertically so they never overlap.
+    const labelBox = document.createElement('div');
+    labelBox.className = 'plabels'; el.appendChild(labelBox);
+    let labels = [], labelSig = '';
     function drawLines() {
       if (!series) return;
       priceLines.forEach(l => series.removePriceLine(l)); priceLines = [];
       const f = factor(), S_ = LightweightCharts.LineStyle;
-      for (const l of allLines()) priceLines.push(series.createPriceLine({
-        price: l.price * f, color: css(l.color), lineWidth: l.width || 1, lineStyle: l.style === 'dashed' ? S_.Dashed : S_.Solid,
-        axisLabelVisible: l.axis !== false, title: l.title || '' }));
+      const style = { dashed: S_.Dashed, dotted: S_.Dotted };
+      labelBox.innerHTML = ''; labels = []; labelSig = '';
+      for (const l of allLines()) {
+        priceLines.push(series.createPriceLine({
+          price: l.price * f, color: css(l.color), lineWidth: l.width || 1, lineStyle: style[l.style] ?? S_.Solid,
+          axisLabelVisible: l.axis !== false, title: '' }));
+        if (!l.title) continue;
+        const node = document.createElement('div');
+        node.className = 'plabel'; node.textContent = l.title;
+        node.style.background = css(l.color); if (l.color === 'fg') node.style.color = css('bg');
+        labelBox.appendChild(node); labels.push({ price: l.price * f, node });
+      }
     }
+    function placeLabels() {
+      requestAnimationFrame(placeLabels);
+      if (!series || !labels.length) return;
+      const paneH = el.clientHeight - chart.timeScale().height(), H = 17;
+      const items = labels.map(l => ({ l, y: series.priceToCoordinate(l.price) }));
+      const sig = paneH + '|' + items.map(i => i.y == null ? 'x' : Math.round(i.y)).join(',');
+      if (sig === labelSig) return; labelSig = sig;
+      const vis = items.filter(i => i.y != null && i.y >= 0 && i.y <= paneH).sort((a, b) => a.y - b.y);
+      for (const i of items) i.l.node.hidden = !vis.includes(i);
+      let top = -Infinity;
+      for (const i of vis) { i.top = Math.max(i.y - H / 2, top + H); top = i.top; }
+      let bottom = paneH - H;
+      for (let k = vis.length - 1; k >= 0; k--) { vis[k].top = Math.min(vis[k].top, bottom); bottom = vis[k].top - H; }
+      for (const i of vis) i.l.node.style.transform = `translateY(${Math.round(i.top)}px)`;
+    }
+    if (chart) requestAnimationFrame(placeLabels);
     function drawMarkers() {
       if (!series || !S.candles.length) return;
       const step = TF[S.tf][2], first = S.candles[0][0];
       const marks = [];
       for (const t of S.txs) {
-        if (!t.ok || !isWinTx(t) || t.time < first) continue;
-        const ty = TYPE[t.type] || TYPE.OTHER, un = after(t), buy = t.win > 0;
+        const note = cfg.notes[t.sig] || {};
+        if (!t.ok || !(isWinTx(t) || note.mark) || t.time < first) continue;
+        const ty = TYPE[t.type] || TYPE.OTHER, un = after(t);
+        if (!isWinTx(t)) {   // money moved without tokens, e.g. a limit order placed
+          marks.push({ time: Math.floor(t.time / step) * step + tz, position: 'aboveBar', shape: 'circle', color: css('muted'), text: note.mark, size: 1 });
+          continue;
+        }
+        const buy = t.win > 0;
         marks.push({ time: Math.floor(t.time / step) * step + tz, position: buy ? 'belowBar' : 'aboveBar', shape: buy ? 'arrowUp' : 'arrowDown',
-          color: css(un ? 'new' : buy ? (t.type === 'CLAIM' ? 'muted' : 'buy') : 'sell'), text: t.type === 'CLAIM' ? 'PRESALE' : ty[0], size: 1 });
+          color: css(un ? 'new' : buy ? (t.type === 'CLAIM' ? 'muted' : 'buy') : 'sell'), text: note.mark || (t.type === 'CLAIM' ? 'PRESALE' : ty[0]), size: 1 });
       }
       marks.sort((a, b) => a.time - b.time);
       series.setMarkers(marks);
@@ -451,8 +506,8 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
       drawLines(); drawMarkers();
     }
     function renderLegend() {
-      $('legend').innerHTML = cfg.legend.map(l => `<span>${l.colors.map(c => `<i class="ln ${l.dashed ? 'dash' : ''}" style="border-color:var(--${c})"></i>`).join('')}${l.text}</span>`).join('')
-        + `<span><i class="ln dash" style="border-color:var(--new)"></i>Новые, не распределённые сделки</span>`;
+      $('legend').innerHTML = cfg.legend.map(l => `<span>${l.colors.map(c => `<i class="ln ${l.dashed ? 'dash' : l.dotted ? 'dot' : ''}" style="border-color:var(--${c})"></i>`).join('')}${l.text}</span>`).join('')
+        + (unallocated().length ? `<span><i class="ln dash" style="border-color:var(--new)"></i>Новые, не распределённые сделки</span>` : '');
     }
 
     let candleReq = 0;
@@ -542,7 +597,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
         }
         S.balances = await L.balances(RPC, cfg);
         S.walletAt = new Date(); S.walletErr = false;
-        drawLines(); if (added) drawMarkers();   // order lines follow the vault balance
+        drawLines(); if (added) { drawMarkers(); renderLegend(); }   // order lines follow the vault balance
         renderTiles(); renderLedger();
       } catch (e) { S.walletErr = true; }
       walletBusy = false; renderStatus();
