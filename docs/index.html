@@ -120,6 +120,10 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
 .op.buy { color: var(--buy); } .op.sell { color: var(--sell); } .op.misc { color: var(--muted); } .op.new { color: var(--new); }
 .who { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .tx a { color: var(--muted); }
+.summary { display: grid; gap: 12px; min-width: 0; }
+table.sumtab { min-width: 520px; }
+.sumtab td { white-space: normal; vertical-align: top; }
+.sumtab th:nth-child(n+2), .sumtab td:nth-child(n+2) { text-align: right; }
 .notes { display: grid; gap: 8px; color: var(--muted); font-size: 14px; max-width: 78ch; }
 .notes p { margin: 0; }
 .notes b { color: var(--fg); font-weight: 600; }
@@ -182,6 +186,11 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
         <tbody id="ledger"></tbody>
       </table>
     </div>
+  </section>
+
+  <section id="summary-sec" hidden>
+    <h2>Итоги</h2>
+    <div class="summary" id="summary"></div>
   </section>
 
   <section>
@@ -356,7 +365,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
         stat(`${SYM} на кошельке`, b ? fmt(b.win) : '…', b && P ? `≈ ${fmt(b.win * P)} USDC` : '')
         + stat('USDC на кошельке', b ? fmt(b.usdc) : '…', (escU > 0.005 ? `+ ${fmt(escU)} в лимитках · ` : '') + (b ? `SOL на газ ${fmt(b.sol, 4)}` : ''))
         + stat(`Цена ${SYM}`, P ? '$' + P.toFixed(6) : '…', P && S.mcapFactor ? `MCap $${compact(P * S.mcapFactor)}` : '')
-        + stat('Средняя цена', avg ? '$' + avg.toFixed(6) : '—', avg && P ? `цена ${sgn((P / avg - 1) * 100, 1)}% от средней` : '', avg && P ? cls(P - avg) : '')
+        + stat('Средняя цена', avg ? '$' + avg.toFixed(6) : '—', avg ? (P ? `цена ${sgn((P / avg - 1) * 100, 1)}% от средней` : '') : 'позиция закрыта, всё в USDC', avg && P ? cls(P - avg) : '')
         + stat('Итог кошелька', b && P ? sgn(wv - tot) + ' USDC' : '…', b && P ? `${sgn((wv - tot) / tot * 100, 1)}% · вложено ${fmt(tot, 0)} · сейчас ${fmt(wv)}` : '', b && P ? cls(wv - tot) : '');
 
       // balance check: allocated + unallocated must equal what the chain says
@@ -628,6 +637,7 @@ tr.unalloc td { background: color-mix(in srgb, var(--new) 8%, transparent); }
     }
 
     $('notes').innerHTML = cfg.notesHtml;
+    if (cfg.summaryHtml) { $('summary').innerHTML = cfg.summaryHtml; $('summary-sec').hidden = false; }
     renderLegend(); applyFormat(); applyTheme();
     renderTiles(); renderLedger(); renderStatus();
     try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme); } catch (e) {}
