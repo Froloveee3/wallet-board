@@ -212,6 +212,7 @@ table.sumtab { min-width: 520px; }
     del(k) { try { localStorage.removeItem(k); } catch (e) {} }
   };
   const PW_KEY = 'wb.pw', TF_KEY = 'wb.tf', MODE_KEY = 'wb.mode';
+  const SOL_MINT = 'So11111111111111111111111111111111111111112';
   // api.mainnet-beta.solana.com refuses browser requests, so the page uses PublicNode
   const RPC = ['https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com'];
 
@@ -268,7 +269,7 @@ table.sumtab { min-width: 520px; }
     const people = cfg.people, SYM = cfg.symbol || 'токен';
     $('th-sym').textContent = SYM; $('only-label').textContent = 'Только операции с ' + SYM + ' и пресейл';
     S = { cfg, pw, txs: wallet.txs.slice(), balances: wallet.balances, syncedAt: wallet.syncedAt,
-          price: cfg.lastPrice || 0, mcapFactor: cfg.circulating || 0, priceAt: null,
+          price: cfg.lastPrice || 0, mcapFactor: cfg.circulating || 0, priceAt: null, solPrice: 0,
           walletAt: null, walletErr: false, priceErr: false,
           tf: store.get(TF_KEY) || '5m', mode: store.get(MODE_KEY) || 'price', candles: [] };
     document.title = cfg.title;
@@ -301,6 +302,14 @@ table.sumtab { min-width: 520px; }
       }
       return r;
     }
+    // After the exit the money may sit in SOL: some people keep a fixed USD share, one person owns the rest.
+    function solSplit() {
+      const c = cfg.solSplit; if (!c) return null;
+      const b = S.balances, price = S.solPrice;
+      const fixedUsd = Object.values(c.fixedUsd).reduce((a, x) => a + x, 0);
+      const restUsd = b && price ? b.sol * price + b.usdc - fixedUsd : null;
+      return { price, fixed: c.fixedUsd, rest: c.rest, restUsd, restSol: restUsd != null ? restUsd / price : null };
+    }
     // Common average cost of everything allocated, orders included.
     function avgCost() {
       let tok = 0, cost = 0;
@@ -313,8 +322,22 @@ table.sumtab { min-width: 520px; }
       const P = S.price, tiles = $('tiles'); let html = '';
       let alloc = 0;
       const { tok: allTok, cost: allCost } = avgCost();
+      const sp = solSplit();
       for (const p of people) {
         const pos = cfg.positions[p.id], o = orderShare(p.id);
+        if (sp) {   // position closed and the money sits in SOL: fixed USD shares, the rest belongs to one person
+          const fixed = sp.fixed[p.id], mine = p.id === sp.rest;
+          const val = fixed != null ? fixed : sp.restUsd, pnl = (pos.withdrawn || 0) + (val == null ? 0 : val) - pos.invested;
+          html += `<div class="tile"><div class="tile-head"><i class="sw" style="background:var(--${p.color})"></i>${p.name}</div>
+            <div class="big ${cls(pnl)}">${val != null ? sgn(pnl) + ' USDC <small>(' + sgn(pnl / pos.invested * 100, 1) + '%)</small>' : '…'}</div>
+            <dl class="kv"><dt>Вложено</dt><dd>${fmt(pos.invested)} USDC</dd>
+            ${pos.withdrawn ? `<dt>Уже выведено</dt><dd>${fmt(pos.withdrawn)} USDC</dd>` : ''}
+            ${fixed != null ? `<dt>Доля на кошельке</dt><dd><b>${fmt(fixed)} USD</b></dd><dt>Это в SOL сейчас</dt><dd>${sp.price ? fmt(fixed / sp.price, 4) + ' SOL' : '…'}</dd>` : ''}
+            ${mine ? `<dt>Остаток на кошельке</dt><dd><b>${val != null ? fmt(val) + ' USD' : '…'}</b></dd><dt>Можно вывести</dt><dd><b>${val != null ? fmt(sp.restSol, 4) + ' SOL' : '…'}</b></dd>` : ''}
+            <dt>Цена SOL</dt><dd>${sp.price ? '$' + fmt(sp.price) : '…'}</dd></dl>
+            <p class="sub" style="font-size:13px;margin:0">${fixed != null ? 'Доля зафиксирована в долларах с ' + cfg.solSplit.since + ', от цены SOL не зависит.' : 'Всё, что на кошельке сверх доли ' + people.filter(x => sp.fixed[x.id] != null).map(x => x.name).join(', ') + ', по живой цене SOL. Рост и падение SOL на этой доле.'}</p></div>`;
+          continue;
+        }
         alloc += pos.tok;
         const tok = pos.tok + o.win, usdc = (pos.usdc || 0) + o.usdc, cost = pos.cost + o.spent;
         const val = tok * P + usdc, unr = tok * P - cost, pnl = unr + pos.realized;
@@ -361,7 +384,16 @@ table.sumtab { min-width: 520px; }
       const tot = people.reduce((a, p) => a + cfg.positions[p.id].invested, 0);
       const wv = b ? b.win * P + b.usdc + escU + escW * P : 0, avg = allTok > 0 ? allCost / allTok : 0;
       const stat = (lbl, val, hint, c = '') => `<div class="stat"><div class="lbl">${lbl}</div><div class="val ${c}">${val}</div><div class="hint">${hint}</div></div>`;
-      $('hero').innerHTML =
+      if (sp) {
+        const out = people.reduce((a, p) => a + (cfg.positions[p.id].withdrawn || 0), 0);
+        const sv = b && sp.price ? b.sol * sp.price + b.usdc + b.win * P : null;
+        $('hero').innerHTML =
+          stat('SOL на кошельке', b ? fmt(b.sol, 4) : '…', sv != null ? `≈ ${fmt(b.sol * sp.price)} USD` : '')
+          + stat('USDC на кошельке', b ? fmt(b.usdc) : '…', b && b.win ? `${SYM}: ${fmt(b.win)}` : `${SYM}: 0`)
+          + stat('Цена SOL', sp.price ? '$' + fmt(sp.price) : '…', 'DEX Screener, live')
+          + stat('Уже выведено', fmt(out) + ' USDC', people.filter(p => cfg.positions[p.id].withdrawn).map(p => p.name).join(', '))
+          + stat('Итог кошелька', sv != null ? sgn(out + sv - tot) + ' USDC' : '…', sv != null ? `${sgn((out + sv - tot) / tot * 100, 1)}% · вложено ${fmt(tot, 0)} · выведено + на кошельке ${fmt(out + sv)}` : '', sv != null ? cls(out + sv - tot) : '');
+      } else $('hero').innerHTML =
         stat(`${SYM} на кошельке`, b ? fmt(b.win) : '…', b && P ? `≈ ${fmt(b.win * P)} USDC` : '')
         + stat('USDC на кошельке', b ? fmt(b.usdc) : '…', (escU > 0.005 ? `+ ${fmt(escU)} в лимитках · ` : '') + (b ? `SOL на газ ${fmt(b.sol, 4)}` : ''))
         + stat(`Цена ${SYM}`, P ? '$' + P.toFixed(6) : '…', P && S.mcapFactor ? `MCap $${compact(P * S.mcapFactor)}` : '')
@@ -373,7 +405,7 @@ table.sumtab { min-width: 520px; }
       if (b) {
         const expW = alloc + uw + esc.reduce((a, e) => a + e.fillWin, 0), expU = people.reduce((a, p) => a + (cfg.positions[p.id].usdc || 0), 0) + uu;
         const dW = b.win - expW, dU = b.usdc - expU;
-        if (Math.abs(dW) > 1e-6 || Math.abs(dU) > 1e-4) {
+        if (Math.abs(dW) > 1e-6 || Math.abs(dU) > 1e-3) {
           banner.hidden = false;
           banner.innerHTML = `<b>Баланс кошелька не сходится с журналом:</b> разница ${sgn(dW, 6)} ${SYM}, ${sgn(dU, 4)} USDC. Скорее всего, новая транзакция ещё не подтянулась, страница проверит снова через минуту.`;
         } else if (un.length) {
@@ -601,8 +633,17 @@ table.sumtab { min-width: 520px; }
         S.price = P; if (p.marketCap) S.mcapFactor = p.marketCap / P;
         S.priceAt = new Date(); S.priceErr = false;
         if (S.mode === 'mcap' && oldFactor !== S.mcapFactor && series) { series.setData(S.candles.map(bar)); drawLines(); }
-        liveBar(); renderTiles(); renderLedger();
+        liveBar();
       } catch (e) { S.priceErr = true; }
+      if (cfg.solSplit) try {   // SOL price for the shares held in SOL: the deepest SOL/USDC pair
+        const r = await fetch('https://api.dexscreener.com/latest/dex/tokens/' + SOL_MINT, { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const best = (await r.json()).pairs.filter(p => p.chainId === 'solana' && p.baseToken.address === SOL_MINT && p.quoteToken.symbol === 'USDC')
+          .sort((a, b) => ((b.liquidity || {}).usd || 0) - ((a.liquidity || {}).usd || 0))[0];
+        const sp = best && parseFloat(best.priceUsd);
+        if (sp > 0) S.solPrice = sp;
+      } catch (e) { /* keep the last SOL price */ }
+      renderTiles(); renderLedger();
       renderStatus();
     }
     let walletBusy = false;
